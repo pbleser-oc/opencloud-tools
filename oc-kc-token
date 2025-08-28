@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+: "${username:=alan}"
+: "${password:=demo}"
+: "${baseurl:=https://cloud.opencloud.test}"
+: "${keycloak:=https://keycloak.opencloud.test}"
+: "${realm:=openCloud}"
+: "${client_id:=groupware}"
+
+xh --verify=no --form POST "${keycloak}/realms/${realm}/protocol/openid-connect/token" username="${username}" password="${password}" grant_type=password client_id="${client_id}" scope=openid | jq -r '.access_token'

@@ -1,0 +1,3 @@
+#!/bin/bash
+set -euo pipefail
+exec docker logs -f "$@" opencloud_full-opencloud-1 2>&1 | hl -F --query '(level>=e) || ((service=groupware) && (!bytes > -1))' --allow-prefix

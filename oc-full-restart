@@ -1,0 +1,23 @@
+#!/bin/bash
+set -euo pipefail
+
+DEPLOYMENT='examples/opencloud_full'
+
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../" &>/dev/null && pwd)"
+cd "${BASE_DIR}/opencloud/deployments/${DEPLOYMENT}/"
+
+debug=
+case "${0##*/}" in
+  *-debug) debug=1;;
+esac
+
+docker compose down||:
+docker compose rm||:
+
+prefix=${DEPLOYMENT##*/}
+docker volume ls --format=json --filter 'dangling=false'|jq -r '.Name'|while read v; do
+  [[ $v == ${prefix}_opencloud-* ]] || continue
+  docker volume rm "$v"
+done
+
+exec oc-full-update${debug--debug} "$@"

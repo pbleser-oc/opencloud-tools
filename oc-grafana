@@ -1,0 +1,27 @@
+#!/bin/bash
+
+set -eo pipefail
+
+GRAFANA_NAME="oc-grafana"
+GRAFANA_PORT=3000
+GRAFANA_PROVISIONING_DIR="etc/grafana/provisioning"
+GRAFANA_VOLUME="oc-grafana-data"
+GRAFANA_IMAGE="grafana/grafana-oss:latest"
+NETWORK="opencloud_full_opencloud-net"
+MEM="256m"
+ 
+cd "${0%/*}/../"
+ 
+PROV_DIR=$(cd "${GRAFANA_PROVISIONING_DIR}" && pwd)
+ 
+exec docker run \
+    -d \
+    --rm \
+    --name="${GRAFANA_NAME}" \
+    --memory="${MEM}" --memory-swap="${MEM}" \
+    --network="${NETWORK}" \
+    -p "${GRAFANA_PORT}:3000" \
+    -v "${PROV_DIR}:/etc/grafana/provisioning" \
+    -v "${GRAFANA_VOLUME}:/var/lib/grafana" \
+    "$@" \
+    "${GRAFANA_IMAGE}"

@@ -1,0 +1,13 @@
+#!/bin/bash
+set -eou pipefail
+if [[ $# == 1 ]]; then
+  username="$1"
+  password="demo"
+elif [[ $# == 2 ]]; then
+  username="$1"
+  password="$2"
+else
+  echo 'ERROR: must specify username as first parameter and optionally the password as the second parameter' >&2
+  exit 1
+fi
+exec ldapsearch -h localhost -D "uid=${username},ou=users,dc=opencloud,dc=eu" -x -w "${password}" -b 'ou=users,dc=opencloud,dc=eu' -LLL '(objectClass=person)' dn

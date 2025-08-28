@@ -1,0 +1,32 @@
+#!/bin/bash
+
+set -eo pipefail
+
+PROMETHEUS_NAME="oc-prom"
+PROMETHEUS_PORT="9090"
+PROMETHEUS_CONFIG="etc/prometheus.yml"
+PROMETHEUS_VOLUME="oc-prom-data"
+PROMETHEUS_IMAGE="prom/prometheus"
+NETWORK="opencloud_full_opencloud-net"
+MEM="128m"
+
+cd "${0%/*}/../"
+
+exec docker run \
+    -d \
+    --rm \
+    --name="${PROMETHEUS_NAME}" \
+    --memory="${MEM}" --memory-swap="${MEM}" \
+    --network="${NETWORK}" \
+    -p "${PROMETHEUS_PORT}:9090" \
+    -v "${PWD}/${PROMETHEUS_CONFIG}:/etc/prometheus/prometheus.yml" \
+    -v "${PROMETHEUS_VOLUME}:/prometheus" \
+    "$@" \
+    "${PROMETHEUS_IMAGE}" \
+    --config.file=/etc/prometheus/prometheus.yml \
+    --storage.tsdb.path=/prometheus \
+    --web.console.libraries=/usr/share/prometheus/console_libraries \
+    --web.console.templates=/usr/share/prometheus/consoles \
+    --web.enable-remote-write-receiver \
+    --enable-feature=native-histograms
+

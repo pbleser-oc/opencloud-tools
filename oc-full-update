@@ -1,0 +1,93 @@
+#!/bin/bash
+set -euo pipefail
+
+GEN=${FORCE:-""}
+OC_DOCKER_IMAGE='opencloudeu/opencloud'
+OC_DOCKER_TAG='dev'
+DEBUG_OC_DOCKER_TAG='debug'
+DEPLOYMENT='examples/opencloud_full'
+OTLP_PORT='4317'
+OTLP_TUNNEL_CONTAINER='tunnel'
+OTLP_JAEGER_CONTAINER='jaeger'
+
+function on_exit() {
+  local rc=$?
+  if (( rc == 0 )); then
+    say changes deploy
+  else
+    say fail deploy
+  fi
+}
+trap on_exit EXIT
+
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../" &>/dev/null && pwd)"
+cd "${BASE_DIR}/opencloud/deployments/${DEPLOYMENT}/"
+
+debug=
+case "${0##*/}" in
+  *-debug) debug=1;;
+esac
+
+while getopts 'fg' opt; do
+  case $opt in
+    f) GEN=1;;
+    g) GEN=1;;
+    *) echo "ERROR: invalid option -${opt}" >&2; exit 1;;
+  esac
+done
+shift $((OPTIND - 1))
+
+running=$(docker compose ls -q)
+if [[ -n "$running" ]]; then
+  running_tag=$(docker compose images --format json opencloud | jq -r '.[].Tag')
+  [[ "$running_tag" == "$DEBUG_OC_DOCKER_TAG" ]] && debug=1
+fi
+
+build_target=build
+docker_target=dev-docker
+
+if [[ -n "$debug" ]]; then
+  OC_DOCKER_TAG="${DEBUG_OC_DOCKER_TAG}"
+  case $OC_DOCKER_TAG in
+    debug) docker_target='debug-docker';;
+    *) echo "ERROR: unsupported OC_DOCKER_TAG '$OC_DOCKER_TAG'" >&2; exit 3;;
+  esac
+  build_target=build-debug
+fi
+
+
+if (echo >/dev/tcp/localhost/"$OTLP_PORT") &>/dev/null; then
+  if docker ps --format '{{.Names}}' | grep -qxF "${OTLP_JAEGER_CONTAINER}"; then
+    otlp_container="${OTLP_JAEGER_CONTAINER}"
+  else
+    otlp_container="${OTLP_TUNNEL_CONTAINER}"
+  fi
+  export OTEL_EXPORTER_OTLP_ENDPOINT="http://${otlp_container}:${OTLP_PORT}"
+  export OTEL_TRACES_EXPORTER='otlp'
+  export OTEL_EXPORTER_OTLP_PROTOCOL='grpc'
+  export OC_TRACING_ENABLED='true'
+  export OC_TRACING_TYPE='otlp'
+  export OC_TRACING_ENDPOINT="${otlp_container}:${OTLP_PORT}"
+fi
+
+#say building &
+make -C ../../../opencloud/ clean "${build_target}"
+#say composing &
+
+[[ -n "$GEN" ]] && make -C ../../../opencloud/services/idp/ generate
+
+make -C ../../../opencloud/ "${docker_target}"
+say deploying &
+
+export OC_DOCKER_IMAGE
+export OC_DOCKER_TAG
+
+[[ -n "$debug" ]] && export OPENCLOUD=':opencloud.yml:debug-opencloud.yml'
+
+echo "debug: $debug"
+
+if [[ -n "$running" ]]; then
+  exec docker compose up -d opencloud
+else
+  exec docker compose up -d
+fi

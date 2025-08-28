@@ -1,0 +1,35 @@
+#!/bin/bash
+set -euo pipefail
+: "${username:=alan}"
+: "${password:=demo}"
+: "${baseurl:=https://stalwart.opencloud.test}"
+: "${mimetype:?}"
+
+if [[ $# < 1 ]]; then
+  echo "ERROR: must specify file to blob/upload as parameter" >&2
+  exit 1
+fi
+
+encoded=$(base64 -w0 "$1")
+shift
+
+account_id=$(xh --follow --max-redirects=2 --verify=no -a "${username}:${password}" "${baseurl}/.well-known/jmap" | jq -r '.primaryAccounts."urn:ietf:params:jmap:mail"')
+api_url=$(xh --follow --max-redirects=2 --verify=no -a "${username}:${password}" "${baseurl}/.well-known/jmap" | jq -r '.apiUrl')
+
+cat<<EOF | xh -v --verify=no -a "${username}:${password}" POST "${api_url}" 
+{
+  "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:blob" ],
+  "methodCalls": [
+    ["Blob/upload", {
+      "accountId": "${account_id}",
+      "create": {
+        "1": {
+          "data": [{"data:asBase64": "${encoded}"}],
+          "type": "${mimetype}"
+        }
+      }
+    }, "0"]
+  ]
+}
+EOF
+

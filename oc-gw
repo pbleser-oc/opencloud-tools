@@ -1,0 +1,22 @@
+#!/bin/bash
+set -euo pipefail
+: "${username:=alan}"
+: "${password:=demo}"
+: "${baseurl:=https://cloud.opencloud.test}"
+: "${prefix:=/groupware}"
+: "${keycloak:=https://keycloak.opencloud.test}"
+: "${realm:=openCloud}"
+: "${client_id:=groupware}"
+
+declare -a args
+url=''
+for a in "$@"; do
+  case "$a" in
+    //*) args+=("${baseurl}${prefix}${a#/}");;
+    /*) args+=("${baseurl}$a");;
+    *) args+=("$a");;
+  esac
+done
+
+token=$(xh --verify=no -I --form POST "${keycloak}/realms/${realm}/protocol/openid-connect/token" username="${username}" password="${password}" grant_type=password client_id="${client_id}" scope=openid | jq -r '.access_token')
+exec ${HTTP-https} --verify=no -A bearer -a "${token}" "${args[@]}"

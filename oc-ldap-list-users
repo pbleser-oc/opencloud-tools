@@ -1,0 +1,3 @@
+#!/bin/bash
+set -eou pipefail
+exec ldapsearch -h localhost -D 'cn=admin,dc=opencloud,dc=eu' -x -w 'admin' -b 'ou=users,dc=opencloud,dc=eu' -LLL '(objectClass=person)' "$@"

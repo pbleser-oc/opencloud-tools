@@ -1,0 +1,7 @@
+#!/bin/bash
+set -euo pipefail
+: "${username:=alan}"
+: "${password:=demo}"
+: "${baseurl:=https://stalwart.opencloud.test}"
+
+exec ${HTTP-http} --follow --max-redirects=2 --verify=no -a "${username}:${password}" "${baseurl}/.well-known/jmap"

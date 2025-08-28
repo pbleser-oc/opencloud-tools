@@ -1,0 +1,18 @@
+#!/bin/bash
+set -euo pipefail
+: "${username:=alan}"
+: "${password:=demo}"
+: "${baseurl:=https://stalwart.opencloud.test}"
+
+account_id=$(xh --follow --max-redirects=2 --verify=no -a "${username}:${password}" "${baseurl}/.well-known/jmap" | jq -r '.primaryAccounts."urn:ietf:params:jmap:mail"')
+api_url=$(xh --follow --max-redirects=2 --verify=no -a "${username}:${password}" "${baseurl}/.well-known/jmap" | jq -r '.apiUrl')
+
+cat<<EOF | xh --verify=no -a "${username}:${password}" POST "${api_url}" 
+{
+  "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail" ],
+  "methodCalls": [
+    ["Identity/get", {"accountId": "${account_id}"}, "0"]
+  ]
+}
+EOF
+

@@ -1,0 +1,16 @@
+#!/bin/bash
+set -euo pipefail
+: "${username:=alan}"
+: "${password:=demo}"
+: "${baseurl:=https://stalwart.opencloud.test}"
+
+declare -a args
+url=''
+for a in "$@"; do
+  case "$a" in
+    /*) args+=("${baseurl}$a");;
+    *) args+=("$a");;
+  esac
+done
+
+exec xh --verify=no -I --pretty=all --follow --max-redirects=2 -a "${username}:${password}" "${args[@]}"
