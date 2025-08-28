@@ -84,8 +84,6 @@ export OC_DOCKER_TAG
 
 [[ -n "$debug" ]] && export OPENCLOUD=':opencloud.yml:debug-opencloud.yml'
 
-echo "debug: $debug"
-
 if [[ -n "$running" ]]; then
   exec docker compose up -d opencloud
 else
