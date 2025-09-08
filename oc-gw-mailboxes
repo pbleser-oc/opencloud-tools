@@ -6,7 +6,7 @@ set -euo pipefail
 : "${keycloak:=https://keycloak.opencloud.test}"
 : "${realm:=openCloud}"
 : "${client_id:=groupware}"
-: "${account:=*}"
+: "${account:=_}"
 
 token=$(xh --verify=no --form POST "${keycloak}/realms/${realm}/protocol/openid-connect/token" username="${username}" password="${password}" grant_type=password client_id="${client_id}" scope=openid | jq -r '.access_token')
 
