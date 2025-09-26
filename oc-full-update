@@ -21,7 +21,7 @@ function on_exit() {
 trap on_exit EXIT
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../" &>/dev/null && pwd)"
-cd "${BASE_DIR}/opencloud/deployments/${DEPLOYMENT}/"
+cd "${BASE_DIR}/opencloud/devtools/deployments/${DEPLOYMENT}/"
 
 debug=
 case "${0##*/}" in
