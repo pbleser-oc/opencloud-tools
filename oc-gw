@@ -18,8 +18,9 @@ for a in "$@"; do
   esac
 done
 
-token=$(curl -ks -X POST "${keycloak}/realms/${realm}/protocol/openid-connect/token" -d username="${username}" -d password="${password}" -d grant_type=password -d client_id="${client_id}" -d scope=openid | jq -r '.access_token')
+token=$(curl --silent --insecure --fail -X POST "${keycloak}/realms/${realm}/protocol/openid-connect/token" -d username="${username}" -d password="${password}" -d grant_type=password -d client_id="${client_id}" -d scope=openid | jq -r '.access_token')
 
-[[ -n "${HTTP-}" ]] && exec $HTTP -A bearer -a "${token}" "${args[@]}"
+[[ -n "${HTTP-}" ]] && exec $HTTP --verify=no -A bearer -a "${token}" "${args[@]}"
 type -p https &>/dev/null && exec https --verify=no -A bearer -a "${token}" "${args[@]}"
 type -p xh &>/dev/null && exec xh --verify=no -A bearer -a "${token}" "${args[@]}"
+exec curl --silent --insecure --fail --header "Authentication: Bearer ${token}" "${args[@]}"
