@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEPLOYMENT='examples/opencloud_full'
+DEPLOYMENT='opencloud_full'
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../" &>/dev/null && pwd)"
 cd "${BASE_DIR}/opencloud/devtools/deployments/${DEPLOYMENT}/"
