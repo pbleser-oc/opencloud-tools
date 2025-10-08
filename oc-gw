@@ -2,25 +2,53 @@
 set -euo pipefail
 : "${username:=alan}"
 : "${password:=demo}"
-: "${baseurl:=https://cloud.opencloud.test}"
+: "${baseurl:=}"
 : "${prefix:=/groupware}"
 : "${keycloak:=https://keycloak.opencloud.test}"
 : "${realm:=openCloud}"
 : "${client_id:=groupware}"
+: "${opencloud_container:=opencloud_full-opencloud-1}"
+
+# find out whether we have basic auth enabled
+declare -a auth
+container=
+if [[ -n $(docker ps -q -f name="${opencloud_container}") ]]; then
+  # container is running
+  container=1
+  basic_auth=$(docker inspect "${opencloud_container}"|jq -r '.[].Config.Env[]|select(match("^PROXY_ENABLE_BASIC_AUTH="))|.[index("=")+1:]')
+  if [[ "${basic_auth}" == "true" ]]; then
+    auth=("-A" "basic" "-a" "${username}:${password}")
+  fi
+else
+  # container is not running, assume it's running in the IDE
+  baseurl="https://localhost:9200"
+fi
+
+url="${baseurl}"
+if [[ -z "${url}" ]]; then
+  if [[ -n "${container}" ]]; then
+    url="https://cloud.opencloud.test"
+  else
+    url="https://localhost:9200"
+  fi
+fi
 
 declare -a args
-url=''
 for a in "$@"; do
   case "$a" in
-    //*) args+=("${baseurl}${prefix}${a#/}");;
-    /*) args+=("${baseurl}$a");;
+    //*) args+=("${url}${prefix}${a#/}");;
+    /*) args+=("${url}$a");;
     *) args+=("$a");;
   esac
 done
 
-token=$(curl --silent --insecure --fail -X POST "${keycloak}/realms/${realm}/protocol/openid-connect/token" -d username="${username}" -d password="${password}" -d grant_type=password -d client_id="${client_id}" -d scope=openid | jq -r '.access_token')
+if [[ ${#auth[@]} == 0 ]]; then
+  token=$(curl --silent --insecure --fail -X POST "${keycloak}/realms/${realm}/protocol/openid-connect/token" -d username="${username}" -d password="${password}" -d grant_type=password -d client_id="${client_id}" -d scope=openid | jq -r '.access_token')
+  auth=("-A" "bearer" "-a" "$token")
+fi
 
-[[ -n "${HTTP-}" ]] && exec $HTTP --verify=no -A bearer -a "${token}" "${args[@]}"
-type -p https &>/dev/null && exec https --verify=no -A bearer -a "${token}" "${args[@]}"
-type -p xh &>/dev/null && exec xh --verify=no -A bearer -a "${token}" "${args[@]}"
-exec curl --silent --insecure --fail --header "Authentication: Bearer ${token}" "${args[@]}"
+[[ -n "${HTTP-}" ]] && exec $HTTP --verify=no ${auth[@]} "${args[@]}"
+type -p https &>/dev/null && exec https --verify=no ${auth[@]} "${args[@]}"
+type -p xh &>/dev/null && exec xh --verify=no ${auth[@]} "${args[@]}"
+
+echo "ERROR: must install httpie or xh" >&2
