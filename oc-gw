@@ -14,7 +14,6 @@ set -euo pipefail
 declare -a auth
 container=
 
-
 if exec 6<>/dev/tcp/127.0.0.1/"${opencloud_local_port}"; then
   # running locally
   baseurl="https://localhost:9200"
@@ -67,8 +66,10 @@ if [[ ${#auth[@]} == 0 ]]; then
   auth=("-A" "bearer" "-a" "$token")
 fi
 
-[[ -n "${HTTP-}" ]] && exec $HTTP --verify=no ${auth[@]} "${args[@]}"
-type -p https &>/dev/null && exec https --verify=no ${auth[@]} "${args[@]}"
-type -p xh &>/dev/null && exec xh --verify=no ${auth[@]} "${args[@]}"
+traceId=$(echo $RANDOM | md5sum | head -c 16)
+
+[[ -n "${HTTP-}" ]] && exec $HTTP --verify=no ${auth[@]} "${args[@]}" "Trace-Id:${traceId}"
+type -p https &>/dev/null && exec https --verify=no ${auth[@]} "${args[@]}" "Trace-Id:${traceId}"
+type -p xh &>/dev/null && exec xh --verify=no ${auth[@]} "${args[@]}" "Trace-Id:${traceId}"
 
 echo "ERROR: must install httpie or xh" >&2
