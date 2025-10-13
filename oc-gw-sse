@@ -1,13 +1,4 @@
 #!/bin/bash
 set -euo pipefail
 : "${username:=alan}"
-: "${password:=demo}"
-: "${baseurl:=https://cloud.opencloud.test}"
-: "${prefix:=/groupware}"
-: "${keycloak:=https://keycloak.opencloud.test}"
-: "${realm:=openCloud}"
-: "${client_id:=groupware}"
-
-token=$(xh --verify=no -I --form POST "${keycloak}/realms/${realm}/protocol/openid-connect/token" username="${username}" password="${password}" grant_type=password client_id="${client_id}" scope=openid | jq -r '.access_token')
-# ${HTTP-https} --verify=no -A bearer -a "${token}" "${baseurl}${prefix}/"
-exec ${HTTP-https} --verify=no -A bearer -a "${token}" --stream "${baseurl}${prefix}/events/${username}" #stream=="${username}"
+exec oc-gw --stream "//events/${username}"
