@@ -14,34 +14,50 @@ set -euo pipefail
 declare -a auth
 container=
 
-if exec 6<>/dev/tcp/127.0.0.1/"${opencloud_local_port}"; then
-  # running locally
-  baseurl="https://localhost:9200"
-  # assuming it is with basic auth support
-  auth=("-A" "basic" "-a" "${username}:${password}")
-elif [[ -n $(docker ps -q -f name="${opencloud_container}") ]]; then
-  # container is running
-  container=1
-  basic_auth=$(docker inspect "${opencloud_container}"|jq -r '.[].Config.Env[]|select(match("^PROXY_ENABLE_BASIC_AUTH="))|.[index("=")+1:]')
-  if [[ "${basic_auth}" == "true" ]]; then
-    auth=("-A" "basic" "-a" "${username}:${password}")
+function contains() {
+  local -n a=$1
+  local needle=$2
+  local e
+  for e in "${a[@]}"; do
+    [[ $e == $needle ]] && return 0
+  done
+  return 1
+}
+
+
+if [[ -n $(docker ps -q -f name="${opencloud_container}") ]]; then
+  # opencloud container is running
+  # does it include the groupware service?
+  services_str=$(docker inspect "${opencloud_container}"|jq -r '.[].Config.Env[]|select(match("^OC_ADD_RUN_SERVICES="))|.[index("=")+1:]')
+  declare -a services
+  IFS=',' read -a services <<< "$services_str"
+  if contains services 'groupware'; then
+    # opencloud container is running with the groupware service
+    container=1
+
+    # does the container have basic auth enabled?
+    basic_auth=$(docker inspect "${opencloud_container}"|jq -r '.[].Config.Env[]|select(match("^PROXY_ENABLE_BASIC_AUTH="))|.[index("=")+1:]')
+    if [[ "${basic_auth}" == "true" ]]; then
+      # yes, it does
+      auth=("-A" "basic" "-a" "${username}:${password}")
+    else
+      # it doesn't => empty auth array, will trigger fetching an access token
+      auth=()
+    fi
   else
-    # empty auth array, will trigger fetching an access token
-    auth=()
+    # opencloud container is running but without the groupware service
+    # => we are assuming it's running locally in an IDE on ${opencloud_local_port} instead
+    baseurl="https://localhost:${opencloud_local_port}"
+    # assuming it is with basic auth support
+    auth=("-A" "basic" "-a" "${username}:${password}")
   fi
 else
-  # not listening locally, nor running as a container
-  if [[ -z "${baseurl}" ]]; then
-    echo "ERROR: not running locally on \${opencloud_local_port} (${opencloud_local_port}) nor running as a container \${opencloud_container} ('${opencloud_container}') and \${baseurl} is not set either" >&2
-    exit 9
-  else
-    # assuming we need to fetch a token
-    auth=()
-  fi
+  # opencloud container is not running
+  # => we are assuming it's running locally in an IDE on ${opencloud_local_port} instead
+  baseurl="https://localhost:${opencloud_local_port}"
+  # assuming it is with keycloak
+  auth=()
 fi
-
-exec 6>&- # close output connection
-exec 6<&- # close input connection
 
 url="${baseurl}"
 if [[ -z "${url}" ]]; then
