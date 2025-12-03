@@ -1,5 +1,14 @@
 #!/bin/bash
+# A script to assist OpenCloud Groupware backend developers to perform queries
+# against its REST API.
+#
+# License: Apache Software License version 2
+#
+# Author: Pascal Bleser <p.bleser@opencloud.eu>
+
 set -euo pipefail
+
+: "${XDG_CACHE_HOME:=$HOME/.cache}"
 : "${username:=alan}"
 : "${password:=demo}"
 : "${baseurl:=}"
@@ -8,11 +17,103 @@ set -euo pipefail
 : "${realm:=openCloud}"
 : "${client_id:=groupware}"
 : "${opencloud_container:=opencloud_full-opencloud-1}"
+: "${opencloud_keycloak_container:=opencloud_full-keycloak-1}"
 : "${opencloud_local_port:=9200}"
+: "${opencloud_cache_token:=1}"
+: "${opencloud_token_cache_file:=${XDG_CACHE_HOME}/oc-gw/token.json}"
 
-# find out whether we have basic auth enabled
-declare -a auth
-container=
+progname="${0##*/}"
+
+b=$'\x1b[33m•\x1b[0m'
+ul=$'\x1b[4m'
+z=$'\x1b[0m'
+hl=$'\x1b[35;1m'
+hz=$'\x1b[0m'
+hv=$'\x1b[35;4m'
+hvz=$'\x1b[0;30;1m:\x1b[0m'
+hd=$'\x1b[30;1m[\x1b[33;1m'
+hdz=$'\x1b[0;30;1m]\x1b[0m'
+
+function usage {
+  cat<<EOF
+${ul}Usage:${z} ${hl}${progname}${hz} [<method>] <url> [<query-param-name>==<value>...] [<header-name>:<value>...]
+
+This is a tiny little script that makes for a more comfortable experience for developers
+who want to use or test the OpenCloud Groupware backend.
+
+It detects whether the OpenCloud Groupware backend is running
+  ${b} as a Docker container as part of the devtools/deployments/opencloud_full compose project,
+  ${b} standalone, typically from within an IDE,
+as well as whether the authentication
+  ${b} is OIDC with a Keycloak container,
+  ${b} is basic authentication that has been enabled for development in the OpenCloud configuration,
+and infers authentication parameters and URLs from there.
+
+If OIDC is detected, it will issue a request for an access token if needed, caching it as
+${hl}${opencloud_token_cache_file}${hz}.
+
+The following environment variables control the behaviour of ${progname}:
+  ${b} ${hv}username${hvz} ${hd}$username${hdz} the username to use for basic authentication or to authenticate
+      against Keycloak
+  ${b} ${hv}password${hvz} ${hd}$password${hdz} the password to use for basic authentication or to authenticate
+      against Keycloak
+  ${b} ${hv}baseurl${hvz} ${hd}$baseurl${hdz} the base URL to use for the HTTP requests against the Groupware backend, leave
+      empty for auto-detection
+  ${b} ${hv}prefix${hvz} ${hd}$prefix${hdz} the URL prefix to use for the HTTP requests against the Groupware backend
+  ${b} ${hv}keycloak${hvz} ${hd}$keycloak${hdz} the fully qualified base URL to the Keycloak IDP
+  ${b} ${hv}realm${hvz} ${hd}$realm${hdz} the name of the IDP realm to use to retrieve a token from Keycloak
+  ${b} ${hv}client_id${hvz} ${hd}$client_id${hdz} the client identifier to use to retrieve a token from Keycloak
+  ${b} ${hv}opencloud_container${hvz} ${hd}$opencloud_container${hdz} the name of the OpenCloud container
+  ${b} ${hv}opencloud_keycloak_container${hvz} ${hd}$opencloud_keycloak_container${hdz} the name of the Keycloak container
+  ${b} ${hv}opencloud_local_port${hvz} ${hd}$opencloud_local_port${hdz} the port a locally (non containerized) running OpenCloud
+      process is listening on
+  ${b} ${hv}opencloud_cache_token${hvz} ${hd}$opencloud_cache_token${hdz} whether JWTs that are retrieved from Keycloak should be cached
+      on disk and re-used until expiration or not; empty means not, anything non-empty means yes
+  ${b} ${hv}opencloud_token_cache_file${hvz} ${hd}$opencloud_token_cache_file${hdz} the fully qualified path
+      to the file to use to cache the JWT (only if opencloud_cache_token is enabled)
+  ${b} ${hv}traceId${hvz} the value to use for the Trace-Id HTTP request header, defaults to generating
+      a random one
+  ${b} ${hv}requestId${hvz} the value to use for the X-Request-Id HTTP request header, defaults to generating
+      a random one
+
+The ${hl}<url>${hz} parameter is expected to be a relative URL, and the following shortcuts are supported:
+  ${b} if the URL starts with ${hl}///${hz} then it is replaced with the prefix for the default account,
+    typically ${hl}/groupware/accounts/_${hz}
+  ${b} if the URL starts with ${hl}//${hz} then it is replaced with the prefix for the Groupware API,
+    typically ${hl}/groupware${hz} (see the prefix environment variable)
+
+The ${hl}HTTP verb${hz} may be mentioned as a parameter, at any position, in uppercase, defaulting to GET.
+
+${hl}Query parameters${hz} may be specified as a parameter, at any position, using the following syntax:
+  name${hl}==${hz}value
+
+${hl}HTTP headers${hz} may be specified as a parameter, at any position, using the following syntax:
+  name${hl}:${hz}value
+
+${ul}Examples:${z}
+  ${b} ${progname} ///mailboxes/a/emails
+  ${b} ${progname} //accounts/e/emails id==sxjaeeu
+  ${b} ${progname} POST ///blobs Content-Type:image/png < ./logo.png
+
+EOF
+}
+
+# check whether help is requested
+if [[ $# == 0 || ( $1 == '--help' || $1 == '-h' || $1 == 'help' ) ]]; then
+  usage
+  exit 0
+fi
+
+# check for prerequisites
+declare -a missing=()
+for r in curl docker jq; do
+  command -v "$r" &>/dev/null || missing+=("$r") 
+done
+if [[ ${#missing[@]} > 0 ]]; then
+  echo "ERROR: the following prerequisites are missing:" >&2
+  for r in "${missing[@]}"; do echo "  - ${r}" >&2; done
+  exit 3
+fi
 
 function contains() {
   local -n a=$1
@@ -24,6 +125,20 @@ function contains() {
   return 1
 }
 
+function env_from() {
+  local pid=$1
+  local name=$2
+  local p
+  local k
+  while IFS= read -r -d '' p; do k=${p%%=*}; [[ $k == $name ]] && printf '%s\n' "${p#*=}"; done <"/proc/${pid}/environ"
+}
+
+# find out whether we have basic auth enabled
+declare -a auth
+container=
+
+use_basic_auth=("-A" "basic" "-a" "${username}:${password}")
+use_token_auth=()
 
 if [[ -n $(docker ps -q -f name="${opencloud_container}") ]]; then
   # opencloud container is running
@@ -39,24 +154,39 @@ if [[ -n $(docker ps -q -f name="${opencloud_container}") ]]; then
     basic_auth=$(docker inspect "${opencloud_container}"|jq -r '.[].Config.Env[]|select(match("^PROXY_ENABLE_BASIC_AUTH="))|.[index("=")+1:]')
     if [[ "${basic_auth}" == "true" ]]; then
       # yes, it does
-      auth=("-A" "basic" "-a" "${username}:${password}")
+      auth=("${use_basic_auth[@]}")
     else
       # it doesn't => empty auth array, will trigger fetching an access token
-      auth=()
+      auth=("${use_token_auth[@]}")
     fi
   else
     # opencloud container is running but without the groupware service
     # => we are assuming it's running locally in an IDE on ${opencloud_local_port} instead
-    baseurl="https://localhost:${opencloud_local_port}"
+    [[ -z "$baseurl" ]] && baseurl="https://localhost:${opencloud_local_port}"
     # assuming it is with basic auth support
-    auth=("-A" "basic" "-a" "${username}:${password}")
+    auth=("${use_basic_auth[@]}")
   fi
 else
   # opencloud container is not running
   # => we are assuming it's running locally in an IDE on ${opencloud_local_port} instead
-  baseurl="https://localhost:${opencloud_local_port}"
-  # assuming it is with keycloak
-  auth=()
+  [[ -z "$baseurl" ]] && baseurl="https://localhost:${opencloud_local_port}"
+  # check whether keycloak is running
+  if [[ -n $(docker ps -q -f name="${opencloud_keycloak_container}") ]]; then
+    auth=("${use_token_auth[@]}")
+  else
+    # let's see whether it's running from an IDE
+    pid=$(ps h x -o pid,cmd | while read p c; do [[ "$c" =~ /opencloud/cmd/opencloud/.*\ server$ ]] && echo "$p"||:; done)
+    if [[ -z "$pid" ]]; then
+      v=$(env_from "$pid" PROXY_ENABLE_BASIC_AUTH)
+      case "$v" in
+        true|yes|1) auth=("${use_basic_auth[@]}");;
+        *) auth=("${use_token_auth[@]}")
+      esac
+    else
+      # assuming it's basic auth
+      auth=("${use_basic_auth[@]}")
+    fi
+  fi
 fi
 
 url="${baseurl}"
@@ -71,6 +201,7 @@ fi
 declare -a args
 for a in "$@"; do
   case "$a" in
+    ///*) args+=("${url}${prefix}/accounts/_/${a#///}");;
     //*) args+=("${url}${prefix}${a#/}");;
     /*) args+=("${url}$a");;
     *) args+=("$a");;
@@ -78,14 +209,38 @@ for a in "$@"; do
 done
 
 if [[ ${#auth[@]} == 0 ]]; then
-  token=$(curl --silent --insecure --fail -X POST "${keycloak}/realms/${realm}/protocol/openid-connect/token" -d username="${username}" -d password="${password}" -d grant_type=password -d client_id="${client_id}" -d scope=openid | jq -r '.access_token')
-  auth=("-A" "bearer" "-a" "$token")
+  token=
+  if [[ -n "${opencloud_cache_token}" && -f "${opencloud_token_cache_file}" ]]; then
+    token=$(< "${opencloud_token_cache_file}")
+    fetched_secs=$(stat -c %Y "${opencloud_token_cache_file}")
+    exp_in_secs=$(jq -r .expires_in <<<$token)
+    if [[ -z "$exp_in_secs" ]]; then
+      # token has no expires_in attribute => renew
+      token=
+    else
+      exp=$((fetched_secs + exp_in_secs - 5)) # 5s of jitter time
+      printf -v now '%(%s)T' -1
+      remaining_secs=$((exp - now))
+      ((remaining_secs <= 0)) && token='' # expired
+    fi
+  fi
+  if [[ -z "$token" ]]; then
+    token=$(curl --silent --insecure --fail -X POST "${keycloak}/realms/${realm}/protocol/openid-connect/token" -d username="${username}" -d password="${password}" -d grant_type=password -d client_id="${client_id}" -d scope=openid)
+    d="${opencloud_token_cache_file%/*}"
+    mkdir -p "$d"
+    cat >"${opencloud_token_cache_file}" <<<"$token"
+  fi
+  access_token=$(jq -r '.access_token' <<<$token)
+  auth=("-A" "bearer" "-a" "$access_token")
 fi
 
-traceId=$(echo $RANDOM | md5sum | head -c 16)
+[[ -z "${traceId=}" ]] && traceId=$(md5sum <<<$RANDOM| head -c 16)
+args+=("Trace-Id:${traceId}")
+[[ -z "${requestId=}" ]] && requestId=$(md5sum <<<$RANDOM| head -c 16)
+args+=("X-Request-Id:${requestId}")
 
-[[ -n "${HTTP-}" ]] && exec $HTTP --verify=no ${auth[@]} "${args[@]}" "Trace-Id:${traceId}"
-type -p https &>/dev/null && exec https --verify=no ${auth[@]} "${args[@]}" "Trace-Id:${traceId}"
-type -p xh &>/dev/null && exec xh --verify=no ${auth[@]} "${args[@]}" "Trace-Id:${traceId}"
+[[ -n "${HTTP-}" ]] && exec $HTTP --verify=no ${auth[@]} "${args[@]}"
+hash https &>/dev/null && exec https --verify=no ${auth[@]} "${args[@]}"
+hash -v xh &>/dev/null && exec xh --verify=no ${auth[@]} "${args[@]}"
 
-echo "ERROR: must install httpie or xh" >&2
+echo "ERROR: must install httpie (https) or xh" >&2
