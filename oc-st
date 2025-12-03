@@ -4,6 +4,37 @@ set -euo pipefail
 : "${password:=demo}"
 : "${stalwart:=https://stalwart.opencloud.test}"
 
+h=
+for t in xh https curl; do
+  hash "$t" &>/dev/null && { h="$t"; break; }
+done
+[[ -n "$h" ]] || { echo "ERROR: failed to find supported HTTP client (httpie, xh, curl)" >&2; exit 1; }
+
+function q {
+  local verb=$1; shift
+  local url=$1; shift
+  case "$h" in
+    xh|http|https) "$h" --follow --max-redirects=2 --verify=no -a "${username}:${password}" --ignore-stdin "${verb}" "${url}";;
+    curl) "$h" --silent --fail --location --insecure -u "${username}:${password}" -X "${verb}" "${url}";;
+    *) echo "ERROR: unsupported HTTP client: ${h}" >&2; exit 1;;
+  esac
+  return $?
+}
+
+function pretty {
+  local verb=$1; shift
+  local url=$1; shift
+  case "$h" in
+    xh|http|https) "$h" --follow --max-redirects=2 --verify=no -a "${username}:${password}" --print=HBhb --pretty=all "${verb}" "${url}";;
+    curl) "$h" --silent --fail --location --insecure -u "${username}:${password}" -X "${verb}" -D- "${url}" --data-binary @- | jq -R -r '. as $line | try fromjson catch $line';;
+    *) echo "ERROR: unsupported HTTP client: ${h}" >&2; exit 1;;
+  esac
+  return $?
+}
+
+account_id=$(q GET "${stalwart}/.well-known/jmap" | jq -r '.primaryAccounts."urn:ietf:params:jmap:mail"')
+api_url=$(q GET "${stalwart}/.well-known/jmap" | jq -r '.apiUrl')
+
 declare -a args
 url=''
 for a in "$@"; do
@@ -13,4 +44,9 @@ for a in "$@"; do
   esac
 done
 
-exec xh --verify=no -I --pretty=all --follow --max-redirects=2 -a "${username}:${password}" "${args[@]}"
+body=$(account_id="${account_id}" \
+accountId="${account_id}" \
+envsubst)
+
+pretty POST "${api_url}" <<<$body
+exit $?
