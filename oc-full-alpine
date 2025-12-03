@@ -1,0 +1,3 @@
+#!/bin/bash
+set -euo pipefail
+exec docker run --network 'opencloud_full_opencloud-net' --rm --name "alpine-${RANDOM}" -ti "alpine" "$@"
