@@ -8,6 +8,7 @@
 
 set -euo pipefail
 
+# set defaults for environment variables
 : "${XDG_CACHE_HOME:=$HOME/.cache}"
 : "${username:=alan}"
 : "${password:=demo}"
@@ -109,6 +110,12 @@ declare -a missing=()
 for r in curl docker jq; do
   command -v "$r" &>/dev/null || missing+=("$r") 
 done
+h=
+for r in xh https; do
+  hash "$r" &>/dev/null && { h="$r"; break; }
+done
+[[ -n "$h" ]] || missing+=("xh or httpie")
+
 if [[ ${#missing[@]} > 0 ]]; then
   echo "ERROR: the following prerequisites are missing:" >&2
   for r in "${missing[@]}"; do echo "  - ${r}" >&2; done
@@ -133,7 +140,19 @@ function env_from() {
   while IFS= read -r -d '' p; do k=${p%%=*}; [[ $k == $name ]] && printf '%s\n' "${p#*=}"; done <"/proc/${pid}/environ"
 }
 
-# find out whether we have basic auth enabled
+function pager {
+  if [[ -n "${PAGER-}" ]]; then
+    ${PAGER}
+  elif hash less &>/dev/null; then
+    less -FR
+  else
+    more
+  fi
+  return $?
+}
+
+# determine how to authenticate
+
 declare -a auth
 container=
 
@@ -189,6 +208,8 @@ else
   fi
 fi
 
+# determine which base URL to use
+
 url="${baseurl}"
 if [[ -z "${url}" ]]; then
   if [[ -n "${container}" ]]; then
@@ -197,6 +218,8 @@ if [[ -z "${url}" ]]; then
     url="https://localhost:9200"
   fi
 fi
+
+# process arguments and do our magic
 
 declare -a args
 for a in "$@"; do
@@ -208,39 +231,53 @@ for a in "$@"; do
   esac
 done
 
+# potentially authenticate with OIDC by retrieving a JWT from the OIDC
+
 if [[ ${#auth[@]} == 0 ]]; then
+  # the auth array is empty, which means we have to authenticate with OIDC
   token=
   if [[ -n "${opencloud_cache_token}" && -f "${opencloud_token_cache_file}" ]]; then
+    # we have a cached JWT, load it into a variable
     token=$(< "${opencloud_token_cache_file}")
+    # ... and determine whether it's expired or not
     fetched_secs=$(stat -c %Y "${opencloud_token_cache_file}")
     exp_in_secs=$(jq -r .expires_in <<<$token)
     if [[ -z "$exp_in_secs" ]]; then
-      # token has no expires_in attribute => renew
+      # token has no expires_in attribute => consider it as expired
       token=
     else
       exp=$((fetched_secs + exp_in_secs - 5)) # 5s of jitter time
-      printf -v now '%(%s)T' -1
+      printf -v now '%(%s)T' -1 # put the current epoch timestamp (in seconds) into the variable 'now'
       remaining_secs=$((exp - now))
       ((remaining_secs <= 0)) && token='' # expired
     fi
   fi
   if [[ -z "$token" ]]; then
+    # if token is empty, retrieve a new one from the OIDC
     token=$(curl --silent --insecure --fail -X POST "${keycloak}/realms/${realm}/protocol/openid-connect/token" -d username="${username}" -d password="${password}" -d grant_type=password -d client_id="${client_id}" -d scope=openid)
+    # and store it into the cache file
     d="${opencloud_token_cache_file%/*}"
     mkdir -p "$d"
     cat >"${opencloud_token_cache_file}" <<<"$token"
   fi
+  # extract the access_token attribute value from the JWT
   access_token=$(jq -r '.access_token' <<<$token)
   auth=("-A" "bearer" "-a" "$access_token")
 fi
 
+# set tracing headers
 [[ -z "${traceId=}" ]] && traceId=$(md5sum <<<$RANDOM| head -c 16)
 args+=("Trace-Id:${traceId}")
 [[ -z "${requestId=}" ]] && requestId=$(md5sum <<<$RANDOM| head -c 16)
 args+=("X-Request-Id:${requestId}")
 
-[[ -n "${HTTP-}" ]] && exec $HTTP --verify=no ${auth[@]} "${args[@]}"
-hash https &>/dev/null && exec https --verify=no ${auth[@]} "${args[@]}"
-hash -v xh &>/dev/null && exec xh --verify=no ${auth[@]} "${args[@]}"
+# determine which HTTP client to use
+h=
+for t in xh https; do
+  hash "$t" &>/dev/null && { h="$t"; break; }
+done
+[[ -n "$h" ]] || { echo "ERROR: must install httpie (https) or xh" >&2; exit 1; }
 
-echo "ERROR: must install httpie (https) or xh" >&2
+# finally, actually perform the API request
+"$h" --verify=no --pretty=all ${auth[@]} --print=HBhb "${args[@]}" | pager
+exit $?
