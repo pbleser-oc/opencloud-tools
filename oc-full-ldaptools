@@ -1,0 +1,3 @@
+#!/bin/bash
+set -euo pipefail
+exec docker run --network 'opencloud_full_opencloud-net' --rm --name "ldap-${RANDOM}" -ti "alpine" /bin/sh -c "apk update && apk add openldap-clients && exec /bin/sh -il"
