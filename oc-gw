@@ -16,7 +16,7 @@ set -euo pipefail
 : "${prefix:=/groupware}"
 : "${keycloak:=https://keycloak.opencloud.test}"
 : "${realm:=openCloud}"
-: "${client_id:=groupware}"
+: "${client_id:=web}"
 : "${opencloud_container:=opencloud_full-opencloud-1}"
 : "${opencloud_keycloak_container:=opencloud_full-keycloak-1}"
 : "${opencloud_local_port:=9200}"
