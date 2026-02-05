@@ -44,9 +44,19 @@ for a in "$@"; do
   esac
 done
 
-body=$(account_id="${account_id}" \
-accountId="${account_id}" \
-envsubst)
+function jmap_source() {
+  local f="$1"
+  if [[ -n "$f" ]]; then
+    tail -n +2 < "$f"
+  else
+    cat
+  fi
+  return $?
+}
+
+f=
+[[ $# > 0 ]] && f="$1"
+body=$(jmap_source "$f" | account_id="${account_id}" accountId="${account_id}" envsubst)
 
 pretty POST "${api_url}" <<<$body
 exit $?
